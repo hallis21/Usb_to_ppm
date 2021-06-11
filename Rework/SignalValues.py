@@ -35,7 +35,7 @@ class SignalValues:
             return -1
         
         self.channels_val[chan] = val
-        new_val = ((self.max_value / 100) // val) // 1
+        new_val = val // ((self.max_value / 100))
         self.channels_perc[chan] = new_val
         return 0
 

@@ -15,7 +15,9 @@ class X:
    WAVES=3
 
    def __init__(self, pi, gpio, channels=8, frame_ms=27):
+      # To pigpiod
       self.pi = pi
+      # Pin to use
       self.gpio = gpio
       self.lock = threading.Lock()
 
@@ -77,13 +79,8 @@ class X:
          self._wid[self._next_wid] = None
 
    def update_channel(self, channel, width):
-      self.lock.acquire()
-      try:
-         print("Channel [{}] : {}".format(channel, width))
-         self._widths[channel] = width
-         self._update()
-      finally:
-         self.lock.release()
+      self._widths[channel] = width
+      self._update()
 
    def update_channels(self, widths):
       self._widths[0:len(widths)] = widths[0:self.channels]

@@ -3,7 +3,7 @@ import threading
 from time import sleep
 from time import time
 import inputs
-import datetime
+import pigpio
 
 
 class JoyRead:
@@ -16,25 +16,22 @@ class JoyRead:
         self.thr = thr_name
         self.max = joy_max
         self.max.update(thr_max)
-       
+        self.update_delay = 0.01 # Secs
+
         self.listening = True
 
         # TODO: Change this
-        self.code_to_chan = {"ABS_Y":1 , "ABS_X":2, "ABS_RZ":3, "THR_ABS_Y":0}
-
-        
+        self.code_to_chan = {"ABS_Y": 1,
+            "ABS_X": 2, "ABS_RZ": 4, "THR_ABS_Y": 6}
 
     def update_chan(self, event, dev):
         code = event.code
         if str(dev) == str(self.thr):
             code = "THR_"+code
-        
+
         if code in self.code_to_chan.keys():
             perc = event.state // (self.max[code] / 100)
             self.sg.set_channel_perc(self.code_to_chan[code], perc)
-
-
-
 
     def listen(self, dev):
         idx = -1
@@ -45,12 +42,35 @@ class JoyRead:
             print("oof")
             return
         while self.listening:
-            for event in self.devices.gamepads[idx].read():
-                self.update_chan(event, dev)
+            try:
+                for event in self.devices.gamepads[idx].read():
+                    self.update_chan(event, dev)
+            except:
+                continue
+
 
     def start_listen(self):
         threading.Thread(target=self.listen, args=(self.joy,)).start()
         threading.Thread(target=self.listen, args=(self.thr,)).start()
+
+    def start_wave(self):
+        pi = pigpio.pi()
+        if not pi.connected:
+            print("Not connected")
+            return -1
+
+        pi.wave_tx_stop()  # Start with a clean slate.
+
+        self.ppm = PPM(pi, 4, frame_ms=20)
+
+        self.ppm.update_channels_perc(self.sg.channels_perc)
+        threading.Thread(target=self._start_updates).start()
+        return 0
+    
+    def _start_updates(self):
+        while self.listening:
+            self.ppm.update_channels_perc(self.sg.channels_perc)
+            sleep(self.update_delay)
 
 
 def setup_joy():
@@ -59,7 +79,7 @@ def setup_joy():
     max_values_thr = dict()
     joy_name = ""
     thr_name = ""
-    
+
     if os.path.exists("joy_config.cfg"):
         with open("joy_config.cfg", "r") as f:
             joy_name = f.readline().strip()
@@ -109,8 +129,6 @@ def setup_joy():
                 continue
         print(str(max_values_joy))
 
-        
-
         print("Select throttle:")
         for i, dev in enumerate(devices.gamepads):
             if i == joy_idx:
@@ -125,7 +143,6 @@ def setup_joy():
                 continue
             if thr_idx == joy_idx:
                 thr_idx = -1
-
 
         print("Move the throttle from 0 to max (5 seconds)")
         start = time()
@@ -148,7 +165,6 @@ def setup_joy():
             del max_values_thr[x]
 
         print(str(max_values_thr))
-        
 
         joy_name = str(devices.gamepads[joy_idx])
         thr_name = str(devices.gamepads[thr_idx])
@@ -167,20 +183,9 @@ def setup_joy():
                     f.write("\n")
                     f.write(key+";"+str(max_values_thr[key]))
 
-
-
-
     sg = SignalValues(8)
 
-    
     return JoyRead(sg, joy_name, thr_name, max_values_joy, max_values_thr)
-
-
-
-    
-
-
-
 
 
 # SignalValues
@@ -191,12 +196,12 @@ class SignalValues:
         self.n_channels = n
         self.throttle = throttle
         # TODO: Add values
-        self.min_value = 0
-        self.max_value = 100
-        self.net_value = self.max_value // 2
+        self.min_value = 750
+        self.max_value = 1700
+        self.net_value = (self.max_value+self.min_value) // 2
 
-        self.channels_val = [self.net_value for x in range(self.n_channels)]
-        self.channels_perc = [50 for x in range(self.n_channels)]
+        self.channels_val = [self.net_value]*self.n_channels
+        self.channels_perc = [50] * self.n_channels
         self.channels_val[throttle] = 0
         self.channels_perc[throttle] = 0
         self.th = None
@@ -258,6 +263,97 @@ class SignalValues:
             self.th.join()
 
 
+class PPM:
+
+   GAP = 300
+   WAVES = 3
+
+   def __init__(self, pi, gpio, channels=8, frame_ms=20):
+      # To pigpiod
+      self.pi = pi
+      # Pin to use
+      self.gpio = gpio
+      self.lock = threading.Lock()
+
+      self.max_val = 1700
+      self.min_val = 750
+
+      if frame_ms < 5:
+         frame_ms = 5
+         channels = 2
+      elif frame_ms > 100:
+         frame_ms = 100
+
+      self.frame_ms = frame_ms
+
+      self._frame_us = int(frame_ms * 1000)
+      self._frame_secs = frame_ms / 1000.0
+
+      if channels < 1:
+         channels = 1
+      elif channels > (frame_ms // 2):
+         channels = int(frame_ms // 2)
+
+      self.channels = channels
+
+      # set each channel to minimum pulse width
+      self._widths = [1050] * channels
+
+      self._wid = [None]*self.WAVES
+      self._next_wid = 0
+
+      pi.write(gpio, pigpio.LOW)
+
+      self._update_time = time()
+
+   def _update(self):
+      wf = []
+      micros = 0
+      for i in self._widths:
+         wf.append(pigpio.pulse(0, 1 << self.gpio, self.GAP))
+         wf.append(pigpio.pulse(1 << self.gpio, 0, i))
+         micros += (i+self.GAP)
+      # off for the remaining frame period
+      wf.append(pigpio.pulse(0, 1 << self.gpio, self._frame_us-micros))
+
+      self.pi.wave_add_generic(wf)
+      wid = self.pi.wave_create()
+      self.pi.wave_send_using_mode(wid, pigpio.WAVE_MODE_REPEAT_SYNC)
+      self._wid[self._next_wid] = wid
+
+      self._next_wid += 1
+      if self._next_wid >= self.WAVES:
+         self._next_wid = 0
+
+      remaining = self._update_time + self._frame_secs - time()
+      if remaining > 0:
+         sleep(remaining)
+      self._update_time = time()
+
+      wid = self._wid[self._next_wid]
+      if wid is not None:
+         self.pi.wave_delete(wid)
+         self._wid[self._next_wid] = None
+
+   def update_channel(self, channel, width):
+      self._widths[channel] = width
+      self._update()
+
+   def update_channels(self, widths):
+      self._widths[0:len(widths)] = widths[0:self.channels]
+      self._update()
+
+
+   def update_channels_perc(self, percentages):
+        widths = [int(((((self.max_val-self.min_val)/100)*x)+self.min_val)) for x in percentages]
+        self._widths[0:len(widths)] = widths[0:self.channels]
+        self._update()
+
+   def cancel(self):
+      self.pi.wave_tx_stop()
+      for i in self._wid:
+         if i is not None:
+            self.pi.wave_delete(i)
 
 
 
@@ -265,6 +361,14 @@ if __name__ == "__main__":
     joy = setup_joy()
     joy.start_listen()
     joy.sg.show_plot()
+
+    if joy.start_wave() == -1:
+        joy.sg.kill_window()
+        joy.ppm.cancel()
+        print("OOF")
+        joy.listening = False
+
     input()
     joy.sg.kill_window()
+    joy.ppm.cancel()
     joy.listening = False

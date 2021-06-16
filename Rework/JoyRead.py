@@ -1,3 +1,4 @@
+import sys
 import os
 import threading
 from time import sleep
@@ -9,6 +10,8 @@ import pigpio
 class JoyRead:
     def __init__(self, sg, joy_name, thr_name, joy_max, thr_max):
         self.sg = sg
+        self.ppm = None
+        
 
         self.devices = inputs.DeviceManager()
         # TODO: Support pedals
@@ -21,8 +24,8 @@ class JoyRead:
         self.listening = True
 
         # TODO: Change this
-        self.code_to_chan = {"ABS_Y": 1,
-            "ABS_X": 2, "ABS_RZ": 4, "THR_ABS_Y": 6}
+        self.code_to_chan = {"ABS_Y": 2,
+            "ABS_X": 4, "ABS_RZ": 1, "THR_ABS_Y": 3}
 
     def update_chan(self, event, dev):
         code = event.code
@@ -30,7 +33,10 @@ class JoyRead:
             code = "THR_"+code
 
         if code in self.code_to_chan.keys():
-            perc = event.state // (self.max[code] / 100)
+            if code == "THR_ABS_Y":
+                perc = 100 - (event.state // (self.max[code] / 100))
+            else:
+                perc = event.state // (self.max[code] / 100)
             self.sg.set_channel_perc(self.code_to_chan[code], perc)
 
     def listen(self, dev):
@@ -183,7 +189,7 @@ def setup_joy():
                     f.write("\n")
                     f.write(key+";"+str(max_values_thr[key]))
 
-    sg = SignalValues(8)
+    sg = SignalValues(7, throttle=3)
 
     return JoyRead(sg, joy_name, thr_name, max_values_joy, max_values_thr)
 
@@ -192,9 +198,10 @@ def setup_joy():
 
 
 class SignalValues:
-    def __init__(self, n, throttle=0):
+    def __init__(self, n, throttle=0, dead_zone=2):
         self.n_channels = n
         self.throttle = throttle
+    
         # TODO: Add values
         self.min_value = 750
         self.max_value = 1700
@@ -210,6 +217,18 @@ class SignalValues:
     def set_channel_perc(self, chan, perc):
         if (0 > perc > 100):
             return -1
+        
+        # Dead zone
+        if chan != self.throttle:
+            if 48 < perc < 52:
+                perc = 50
+        else:
+            if 98 <= perc:
+                perc = 100
+            elif 2 >= perc:
+                perc = 0
+
+
 
         new_val = ((self.max_value / 100) * perc) // 1
 
@@ -217,6 +236,8 @@ class SignalValues:
         self.channels_perc[chan] = perc
         return 0
 
+
+    # Unused
     def set_channel_val(self, chan, val):
         if (self.min_value > val > self.max_value):
             return -1
@@ -360,15 +381,24 @@ class PPM:
 if __name__ == "__main__":
     joy = setup_joy()
     joy.start_listen()
-    joy.sg.show_plot()
+    if len(sys.argv) == 2:
+        joy.sg.show_plot()  
 
-    if joy.start_wave() == -1:
-        joy.sg.kill_window()
-        joy.ppm.cancel()
-        print("OOF")
-        joy.listening = False
+    if len(sys.argv) == 1:
+        print("Starting wave")
+        if joy.start_wave() == -1:
+            # joy.sg.kill_window()
+            if (joy.ppm != None):
+                joy.ppm.cancel()
+            print("OOF")
+            joy.listening = False
+            exit()
+
+    
 
     input()
-    joy.sg.kill_window()
-    joy.ppm.cancel()
+    if len(sys.argv) == 2:
+        joy.sg.kill_window()
+    if (joy.ppm != None):
+        joy.ppm.cancel()
     joy.listening = False

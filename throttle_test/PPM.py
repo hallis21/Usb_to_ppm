@@ -3,6 +3,7 @@
 # PPM.py
 # 2016-02-18
 # Public Domain
+# Gotten from PIGPIOD
 
 import inputs
 import threading
@@ -92,6 +93,12 @@ class X:
          if i is not None:
             self.pi.wave_delete(i)
 
+
+"""
+Enables USB event monitoring
+Updates ppm signal every 10ms
+   Update on every event will lag like crazy
+"""
 class Listener:
    def __init__(self, X):
       self.X = X
@@ -101,6 +108,8 @@ class Listener:
       self.pitch = 1225
       self.throttle = 760
       self.yaw = 1225
+
+      ## Reverse channels
       self.pitch_reverse = True
       self.roll_reverse = False
       self.yaw_reverse = False
@@ -149,6 +158,7 @@ class Listener:
                   if(not thr):
                      self.set_yaw(event.state)
                
+               ## If you want AUX channles to reverse, or add AUX buttons
                """#Reverse
                elif event.code == "BTN_TRIGGER_HAPPY3":
                   if not roll_d:

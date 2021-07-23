@@ -136,7 +136,6 @@ class Listener:
       thr = False
       if (str(devices.gamepads[d]) == "Madcatz Saitek Pro Flight X-55 Rhino Throttle"):
          thr = True
-         print(d, "is thr")
       roll_d = False
       pitch_d = False
       yaw_d = False

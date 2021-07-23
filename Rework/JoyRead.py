@@ -24,6 +24,7 @@ class JoyRead:
         self.listening = True
 
         # TODO: Change this
+        # Dictionairy, key is event code, value is channel number
         self.code_to_chan = {"ABS_Y": 2,
             "ABS_X": 4, "ABS_RZ": 1, "THR_ABS_Y": 3}
 

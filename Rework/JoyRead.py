@@ -26,7 +26,7 @@ class JoyRead:
         # TODO: Change this
         # Dictionairy, key is event code, value is channel number
         self.code_to_chan = {"ABS_Y": 2,
-            "ABS_X": 4, "ABS_RZ": 1, "THR_ABS_Y": 3}
+            "ABS_X": 1, "ABS_RZ": 4, "THR_ABS_Y": 3}
 
     def update_chan(self, event, dev):
         code = event.code
